@@ -3,18 +3,29 @@ package main
 import (
 	"fmt"
 	"github.com/biogo/hts/bam"
+	"github.com/biogo/hts/sam"
 	"io"
 	"log"
 	"os"
 )
 
 func main() {
-	bam_file, _ := os.Open("D:\\gobismark\\go_read_bam_test\\b1_Lib1_lane1_hg19_pure.bwt2pairs.bam")
-	// Create a BAI for the BAM read from standard in and write it to standard out.
-	br, err := bam.NewReader(bam_file, 1)
+	bam_read, _ := os.Open("D:\\seqyuan\\go_bowtiePairing\\SC_Pur_01_Lib1_lane1_mm9.bwt2pairs.bam")
+	defer bam_read.Close()
+	br, err := bam.NewReader(bam_read, 1)
 	if err != nil {
 		log.Fatalf("failed to open BAM: %v", err)
 	}
+	defer br.Close()
+
+	f_out, _ := os.OpenFile("D:\\seqyuan\\go_bowtiePairing\\out.bam", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+	defer f_out.Close()
+	bw, err := bam.NewWriter(f_out, br.Header(), 1)
+	if err != nil {
+		log.Fatalf("failed to write BAM: %v", err)
+	}
+	defer bw.Close()
+
 	aa := 0
 	for {
 		r, err := br.Read()
@@ -25,9 +36,16 @@ func main() {
 			log.Fatalf("failed to read BAM record: %v", err)
 		}
 
-		fmt.Println(r.Name, r.Ref, r.Pos, r.Seq)
+		_, ok := r.Tag([]byte("ASsss"))
+
+		fmt.Println(r.Name, ok)
+		if sam.IsValidRecord(r) == false {
+			fmt.Println("000000000000000")
+		}
+
+		err = bw.Write(r)
 		aa += 1
-		if aa > 3 {
+		if aa > 5 {
 			break
 		}
 	}
