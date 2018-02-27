@@ -1,17 +1,26 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/biogo/hts/bam"
 	"github.com/biogo/hts/sam"
 	"io"
 	"log"
 	"os"
-	//"strconv"
 	"strings"
 )
 
-//func pairs(r1 *sam.Record, r2 *sam.Record, stat *map[string]int, mapq int, bw *Writer) {
+func usage() {
+	fmt.Println("Usage : ./mergeSAM")
+	fmt.Println("-f/--forward <forward read mapped file>")
+	fmt.Println("-r/--reverse <reverse read mapped file>")
+	fmt.Println("[-o/--output] <Output file. Default is stdin>")
+	fmt.Println("[-q/--qual] <minimum reads mapping quality>")
+	fmt.Println("[-t/--stat] <generate a stat file>")
+	fmt.Println("[-v/--verbose] <Verbose>")
+	fmt.Println("[-h/--help] <Help>")
+}
 
 func pairs(r1 *sam.Record, r2 *sam.Record, stat map[string]int, mapq int) error {
 	v, _ := stat["Total_pairs_processed"]
@@ -44,7 +53,6 @@ func pairs(r1 *sam.Record, r2 *sam.Record, stat map[string]int, mapq int) error 
 		stat["Multiple_pairs_alignments"] = v + 1
 		return nil
 	}
-
 	return nil
 }
 
@@ -85,7 +93,13 @@ func is_unique_bowtie2(r *sam.Record) (ret bool) {
 }
 
 func main() {
-	bam_read1, _ := os.Open("D:\\seqyuan\\go_bowtiePairing\\SC_Pur_01_Lib1_lane1_R1_mm9.bwt2merged.bam")
+	stat_yes := flag.Bool("s", false, "show stat file")
+	verbose := flag.Bool("v", false, "show verbose")
+	forward_file := flag.String("f", "", "forward read mapped file")
+	reverse_file := flag.String("r", "", "reverse read mapped file")
+	flag.Parse()
+
+	bam_read1, _ := os.Open(*forward_file)
 	defer bam_read1.Close()
 	br1, err := bam.NewReader(bam_read1, 1)
 	if err != nil {
@@ -93,7 +107,7 @@ func main() {
 	}
 	defer br1.Close()
 
-	bam_read2, _ := os.Open("D:\\seqyuan\\go_bowtiePairing\\SC_Pur_01_Lib1_lane1_R2_mm9.bwt2merged.bam")
+	bam_read2, _ := os.Open(*reverse_file)
 	defer bam_read2.Close()
 	br2, err := bam.NewReader(bam_read2, 1)
 	if err != nil {
@@ -101,27 +115,22 @@ func main() {
 	}
 	defer br2.Close()
 
-	/*
-		f_out, _ := os.OpenFile("D:\\seqyuan\\go_bowtiePairing\\out.bam", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
-		defer f_out.Close()
-		bw, err := bam.NewWriter(f_out, br.Header(), 1)
-		if err != nil {
-			log.Fatalf("failed to write BAM: %v", err)
-		}
-		defer bw.Close()
-	*/
+	f_out, _ := os.OpenFile("D:\\seqyuan\\go_bowtiePairing\\out.bam", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+	defer f_out.Close()
+	bw, err := bam.NewWriter(f_out, br.Header(), 1)
+	if err != nil {
+		log.Fatalf("failed to write BAM: %v", err)
+	}
+	defer bw.Close()
 
 	var stat = map[string]int{
-		"Total_pairs_processed":        0,
-		"Unmapped_pairs":               0,
-		"Pairs_with_Singleton":         0,
-		"Low_qual_pairs":               0,
-		"Unique_paired_alignments":     0,
-		"Multiple_pairs_alignments":    0,
-		"---Multiple_pairs_alignments": 0,
+		"Total_pairs_processed":     0,
+		"Unmapped_pairs":            0,
+		"Pairs_with_Singleton":      0,
+		"Low_qual_pairs":            0,
+		"Unique_paired_alignments":  0,
+		"Multiple_pairs_alignments": 0,
 	}
-
-	//aa := 0
 
 	for {
 		r1, err := br1.Read()
@@ -145,12 +154,7 @@ func main() {
 		}
 
 		pairs(r1, r2, stat, 0)
-		/*err = bw.Write(r)
-		aa += 1
-		if aa == 10000000 {
-			break
-		}
-		*/
+
 	}
 	fmt.Println("Total_pairs_processed:", stat["Total_pairs_processed"])
 	fmt.Println("Unmapped_pairs:", stat["Unmapped_pairs"])
