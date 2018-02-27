@@ -17,7 +17,7 @@ func pairs(stat map[string]int32) error {
 }
 
 func main() {
-	bam_read, _ := os.Open("D:\\seqyuanGithub\\goHiC\\goHiC\\SC_Pur_01_Lib1_lane1_R1_mm9.bwt2merged.bam")
+	bam_read, _ := os.Open("D:\\seqyuan\\go_bowtiePairing\\SC_Pur_01_Lib1_lane1_R1_mm9.bwt2merged.bam")
 	defer bam_read.Close()
 	br, err := bam.NewReader(bam_read, 1)
 	if err != nil {
@@ -25,7 +25,7 @@ func main() {
 	}
 	defer br.Close()
 
-	f_out, _ := os.OpenFile("D:\\seqyuanGithub\\goHiC\\goHiC\\out.bam", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+	f_out, _ := os.OpenFile("D:\\seqyuan\\go_bowtiePairing\\out.bam", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
 	defer f_out.Close()
 	bw, err := bam.NewWriter(f_out, br.Header(), 1)
 	if err != nil {
@@ -56,11 +56,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to read BAM record: %v", err)
 		}
-		/*
-			if sam.IsValidRecord(r) == false {
-				fmt.Println("000000000000000")
-			}
-		*/
 
 		err = bw.Write(r)
 

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	//"strconv"
+	"strings"
 )
 
 //func pairs(r1 *sam.Record, r2 *sam.Record, stat *map[string]int, mapq int, bw *Writer) {
@@ -16,13 +17,13 @@ func pairs(r1 *sam.Record, r2 *sam.Record, stat map[string]int, mapq int) error 
 	v, _ := stat["Total_pairs_processed"]
 	stat["Total_pairs_processed"] = v + 1
 
-	if sam.IsValidRecord(r1) == false && sam.IsValidRecord(r1) == false {
+	if strings.Contains(r1.Flags.String(), "u") && strings.Contains(r2.Flags.String(), "u") {
 		v, _ = stat["Unmapped_pairs"]
 		stat["Unmapped_pairs"] = v + 1
 		return nil
 	}
 
-	if sam.IsValidRecord(r1) == false || sam.IsValidRecord(r1) == false {
+	if strings.Contains(r1.Flags.String(), "u") || strings.Contains(r2.Flags.String(), "u") {
 		v, _ = stat["Pairs_with_Singleton"]
 		stat["Pairs_with_Singleton"] = v + 1
 		return nil
@@ -73,17 +74,18 @@ func is_unique_bowtie2(r *sam.Record) (ret bool) {
 				secondary1 = int8(secondary.(uint8))
 			}
 
-			if primary1 > secondary1 {
+			if primary1 != secondary1 {
 				ret = true
 			}
+		} else {
 			ret = true
 		}
 	}
-	return ret
+	return
 }
 
 func main() {
-	bam_read1, _ := os.Open("D:\\seqyuanGithub\\goHiC\\goHiC\\SC_Pur_01_Lib1_lane1_R1_mm9.bwt2merged.bam")
+	bam_read1, _ := os.Open("D:\\seqyuan\\go_bowtiePairing\\SC_Pur_01_Lib1_lane1_R1_mm9.bwt2merged.bam")
 	defer bam_read1.Close()
 	br1, err := bam.NewReader(bam_read1, 1)
 	if err != nil {
@@ -91,7 +93,7 @@ func main() {
 	}
 	defer br1.Close()
 
-	bam_read2, _ := os.Open("D:\\seqyuanGithub\\goHiC\\goHiC\\SC_Pur_01_Lib1_lane1_R2_mm9.bwt2merged.bam")
+	bam_read2, _ := os.Open("D:\\seqyuan\\go_bowtiePairing\\SC_Pur_01_Lib1_lane1_R2_mm9.bwt2merged.bam")
 	defer bam_read2.Close()
 	br2, err := bam.NewReader(bam_read2, 1)
 	if err != nil {
@@ -110,15 +112,16 @@ func main() {
 	*/
 
 	var stat = map[string]int{
-		"Total_pairs_processed":     0,
-		"Unmapped_pairs":            0,
-		"Pairs_with_Singleton":      0,
-		"Low_qual_pairs":            0,
-		"Unique_paired_alignments":  0,
-		"Multiple_pairs_alignments": 0,
+		"Total_pairs_processed":        0,
+		"Unmapped_pairs":               0,
+		"Pairs_with_Singleton":         0,
+		"Low_qual_pairs":               0,
+		"Unique_paired_alignments":     0,
+		"Multiple_pairs_alignments":    0,
+		"---Multiple_pairs_alignments": 0,
 	}
 
-	aa := 0
+	//aa := 0
 
 	for {
 		r1, err := br1.Read()
@@ -142,11 +145,17 @@ func main() {
 		}
 
 		pairs(r1, r2, stat, 0)
-		//err = bw.Write(r)
+		/*err = bw.Write(r)
 		aa += 1
 		if aa == 10000000 {
 			break
 		}
+		*/
 	}
-	fmt.Println(stat)
+	fmt.Println("Total_pairs_processed:", stat["Total_pairs_processed"])
+	fmt.Println("Unmapped_pairs:", stat["Unmapped_pairs"])
+	fmt.Println("Pairs_with_Singleton:", stat["Pairs_with_Singleton"])
+	fmt.Println("Low_qual_pairs:", stat["Low_qual_pairs"])
+	fmt.Println("Multiple_pairs_alignments:", stat["Multiple_pairs_alignments"])
+	fmt.Println("Unique_paired_alignments:", stat["Unique_paired_alignments"])
 }
