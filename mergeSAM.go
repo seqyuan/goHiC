@@ -1,6 +1,7 @@
 package main
 
 import (
+	//	"bufio"
 	"flag"
 	"fmt"
 	"github.com/biogo/hts/bam"
@@ -13,18 +14,20 @@ import (
 
 func usage() {
 	fmt.Println("Usage : ./mergeSAM")
-	fmt.Println("-f/--forward <forward read mapped file>")
-	fmt.Println("-r/--reverse <reverse read mapped file>")
-	fmt.Println("[-o/--output] <Output file. Default is stdin>")
-	fmt.Println("[-q/--qual] <minimum reads mapping quality>")
-	fmt.Println("[-t/--stat] <generate a stat file>")
-	fmt.Println("[-v/--verbose] <Verbose>")
-	fmt.Println("[-h/--help] <Help>")
+	fmt.Println("-f <forward read mapped file>")
+	fmt.Println("-r <reverse read mapped file>")
+	fmt.Println("[-o] <Output file>")
+	fmt.Println("[-q] <minimum reads mapping quality>")
+	fmt.Println("[-t] <generate a stat file>")
+	fmt.Println("[-v] <Verbose>")
 }
 
-func pairs(r1 *sam.Record, r2 *sam.Record, stat map[string]int, mapq int) error {
+func pairs(r1 *sam.Record, r2 *sam.Record, stat map[string]int, mapq int, bw *bam.Writer, verbose bool) error {
 	v, _ := stat["Total_pairs_processed"]
 	stat["Total_pairs_processed"] = v + 1
+	if verbose && v%1000000 == 0 {
+		fmt.Println("##", v)
+	}
 
 	if strings.Contains(r1.Flags.String(), "u") && strings.Contains(r2.Flags.String(), "u") {
 		v, _ = stat["Unmapped_pairs"]
@@ -47,6 +50,14 @@ func pairs(r1 *sam.Record, r2 *sam.Record, stat map[string]int, mapq int) error 
 	if is_unique_bowtie2(r1) && is_unique_bowtie2(r2) {
 		v, _ = stat["Unique_paired_alignments"]
 		stat["Unique_paired_alignments"] = v + 1
+		err := bw.Write(r1)
+		if err != nil {
+			log.Fatalf("write outbam err")
+		}
+		err = bw.Write(r2)
+		if err != nil {
+			log.Fatalf("write outbam err")
+		}
 		return nil
 	} else {
 		v, _ = stat["Multiple_pairs_alignments"]
@@ -92,12 +103,41 @@ func is_unique_bowtie2(r *sam.Record) (ret bool) {
 	return
 }
 
+func percent(part int, all int) string {
+	percent := fmt.Sprintf("%.3f", float64(part)*100/float64(all))
+	return percent
+}
+
+func report_stat(stat map[string]int, outfile string) error {
+	out_stat := strings.Replace(outfile, ".bam", ".pairstat", -1)
+	//stat_out, _ := os.OpenFile(out_stat, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+	stat_out, _ := os.Create(out_stat)
+	defer stat_out.Close()
+	//writer := bufio.NewWriter(stat_out)
+
+	keys := [6]string{"Total_pairs_processed", "Unmapped_pairs", "Pairs_with_Singleton", "Low_qual_pairs", "Unique_paired_alignments", "Multiple_pairs_alignments"}
+	for _, k := range keys {
+		outbyte := fmt.Sprintf("%v\t%v\t%v\n", k, stat[k], percent(stat[k], stat["Total_pairs_processed"]))
+		_, _ = stat_out.WriteString(outbyte)
+	}
+	//writer.Flush()
+	return nil
+}
+
+//%v\t%v  k, stat[k],
+
 func main() {
-	stat_yes := flag.Bool("s", false, "show stat file")
-	verbose := flag.Bool("v", false, "show verbose")
 	forward_file := flag.String("f", "", "forward read mapped file")
 	reverse_file := flag.String("r", "", "reverse read mapped file")
+	outfile := flag.String("o", "", "out put file")
+	mapq := flag.Int("q", 0, "minimum reads mapping quality")
+	stat_yes := flag.Bool("t", false, "show stat file")
+	verbose := flag.Bool("v", false, "show verbose")
 	flag.Parse()
+
+	if *forward_file == "" || *reverse_file == "" || *outfile == "" {
+		log.Fatalf("Parameter error,please check -f -r -o")
+	}
 
 	bam_read1, _ := os.Open(*forward_file)
 	defer bam_read1.Close()
@@ -115,9 +155,9 @@ func main() {
 	}
 	defer br2.Close()
 
-	f_out, _ := os.OpenFile("D:\\seqyuan\\go_bowtiePairing\\out.bam", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+	f_out, _ := os.OpenFile(*outfile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
 	defer f_out.Close()
-	bw, err := bam.NewWriter(f_out, br.Header(), 1)
+	bw, err := bam.NewWriter(f_out, br1.Header(), 1)
 	if err != nil {
 		log.Fatalf("failed to write BAM: %v", err)
 	}
@@ -153,13 +193,10 @@ func main() {
 			log.Fatalf("Forward and reverse reads not paired. Check that BAM files are sorted.")
 		}
 
-		pairs(r1, r2, stat, 0)
-
+		_ = pairs(r1, r2, stat, *mapq, bw, *verbose)
 	}
-	fmt.Println("Total_pairs_processed:", stat["Total_pairs_processed"])
-	fmt.Println("Unmapped_pairs:", stat["Unmapped_pairs"])
-	fmt.Println("Pairs_with_Singleton:", stat["Pairs_with_Singleton"])
-	fmt.Println("Low_qual_pairs:", stat["Low_qual_pairs"])
-	fmt.Println("Multiple_pairs_alignments:", stat["Multiple_pairs_alignments"])
-	fmt.Println("Unique_paired_alignments:", stat["Unique_paired_alignments"])
+
+	if *stat_yes {
+		_ = report_stat(stat, *outfile)
+	}
 }
