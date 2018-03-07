@@ -16,8 +16,8 @@ func usage() {
 	fmt.Println("Usage : ./mergeSAM")
 	fmt.Println("-f <forward read mapped file>")
 	fmt.Println("-r <reverse read mapped file>")
-	fmt.Println("[-o] <Output file>")
-	fmt.Println("[-q] <minimum reads mapping quality>")
+	fmt.Println("-o <Output file>")
+	fmt.Println("[-q] <minimum reads mapping quality,default 0>")
 	fmt.Println("[-t] <generate a stat file>")
 	fmt.Println("[-v] <Verbose>")
 }
@@ -136,6 +136,7 @@ func main() {
 	flag.Parse()
 
 	if *forward_file == "" || *reverse_file == "" || *outfile == "" {
+                usage()
 		log.Fatalf("Parameter error,please check -f -r -o")
 	}
 
@@ -200,3 +201,4 @@ func main() {
 		_ = report_stat(stat, *outfile)
 	}
 }
+
