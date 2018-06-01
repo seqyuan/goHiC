@@ -136,7 +136,7 @@ func main() {
 	flag.Parse()
 
 	if *forward_file == "" || *reverse_file == "" || *outfile == "" {
-                usage()
+		usage()
 		log.Fatalf("Parameter error,please check -f -r -o")
 	}
 
@@ -201,4 +201,3 @@ func main() {
 		_ = report_stat(stat, *outfile)
 	}
 }
-
