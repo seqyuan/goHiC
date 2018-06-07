@@ -446,10 +446,9 @@ func get_valid_orientation(read1, read2 *sam.Record)string{
     return direction
 }
 
-def get_PE_fragment_size(read1, read2 *sam.Record, resFrag1, resFrag2, interactionType){
+def get_PE_fragment_size(read1, read2 *sam.Record, resFrag1, resFrag2 Interval, interactionType string)int{
     /*
     Calculte the size of the DNA fragment library
-
     read1 : [AlignedRead]
     read2 : [AlignedRead]
     resfrag1 = restrictin fragment overlapping the R1 read [interval]
@@ -458,11 +457,13 @@ def get_PE_fragment_size(read1, read2 *sam.Record, resFrag1, resFrag2, interacti
 	*/
 
     var fragmentsize int
+    var rfrag1 Interval
+    var rfrag2 Interval
 
     // Get oriented reads
-    r1, r2 = get_ordered_reads(read1, read2)
+    r1, r2 := get_ordered_reads(read1, read2)
     
-    if not r1.is_unmapped and not r2.is_unmapped:
+    if !strings.Contains(r1.Flags.String(), "u") && !strings.Contains(r2.Flags.String(), "u"):
         if r1 == read2:
             rfrag1 = resFrag2
             rfrag2 = resFrag1
@@ -470,27 +471,87 @@ def get_PE_fragment_size(read1, read2 *sam.Record, resFrag1, resFrag2, interacti
             rfrag1 = resFrag1
             rfrag2 = resFrag2
 
-        ## In this case use the read start !
-        r1pos = get_read_start(r1)
-        r2pos = get_read_start(r2)
+        // In this case use the read start !
+        r1pos := get_read_start(r1)
+        r2pos := get_read_start(r2)
 
-        if interactionType == "DE" or interactionType == "RE":
+        if interactionType == "DE" || interactionType == "RE"{
             fragmentsize = r2pos - r1pos
-        elif interactionType == "SC":
-            fragmentsize = (r1pos - rfrag1.start) + (rfrag2.end - r2pos)
-        elif interactionType == "VI":
-            if get_read_strand(r1) == "+":
-                dr1 = rfrag1.end - r1pos
-            else:
-                dr1 = r1pos - rfrag1.start
-            if get_read_strand(r2) == "+":
-                dr2 = rfrag2.end - r2pos
-            else:
-                dr2 = r2pos - rfrag2.start
+        }else if interactionType == "SC"{
+            fragmentsize = (r1pos - rfrag1.MIN()) + (rfrag2.MAX() - r2pos)
+        }else if interactionType == "VI"{
+        	var dr1,dr2 int
+            if get_read_strand(r1) == "+"{
+                dr1 = rfrag1.MAX() - r1pos
+            }else{
+                dr1 = r1pos - rfrag1.MIN()
+            }
+
+            if get_read_strand(r2) == "+"{
+                dr2 = rfrag2.MAX() - r2pos
+            }else{
+                dr2 = r2pos - rfrag2.MIN()
+            }
             fragmentsize = dr2 + dr1
+        }
 
     return fragmentsize
 }
+
+func get_interaction_type(read1 *sam.Record, read1_chrom string, resfrag1 Interval, read2 *sam.Record,read2_chrom string, resfrag2 Interval)string{
+    /*
+    Returns the interaction type
+    For a given reads pair and their related restriction fragment, classify
+    the 3C products as :
+
+    - Interaction
+    - Self circle
+    - Dangling end
+    - Religation
+    - Unknown
+    //
+    read1 = the R1 read of the pair [AlignedRead]
+    read1_chrom = the chromosome of R1 read [character]
+    resfrag1 = restrictin fragment overlapping the R1 read [interval]
+    read2 = the R2 read of the pair [AlignedRead]
+    read2_chrom = the chromosome of R2 read [character]
+    resfrag2 = restrictin fragment overlapping the R2 read [interval]
+    verbose = verbose mode [logical]
+    */
+    // If returned InteractionType=None -> Same restriction fragment
+    // and same strand = Dump
+    var interactionType string
+ 
+    if !strings.Contains(r1.Flags.String(), "u") && !strings.Contains(r2.Flags.String(), "u") && resfrag1 != nil and resfrag2 != nil{
+        // same restriction fragment
+        if resfrag1 == resfrag2{
+            // Self_circle <- ->
+            if is_self_circle(read1, read2){
+                interactionType = "SC"
+            }else if is_dangling_end(read1, read2){
+            	// Dangling_end -> <-            
+                interactionType = "DE"
+            }
+        }else if is_religation(read1, read2, resfrag1, resfrag2){
+            interactionType = "RE"
+        }else{
+            interactionType = "VI"
+        }
+    }else if !strings.Contains(r1.Flags.String(), "u") && !strings.Contains(r2.Flags.String(), "u"){
+        interactionType = "SI"
+    }
+
+    return interactionType
+}
+
+
+/*
+func get_read_tag(read, tag):
+    for t in read.tags:
+        if t[0] == tag:
+            return t[1]
+    return nil
+*/
 
 
 func main() {
