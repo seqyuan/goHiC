@@ -13,6 +13,7 @@ import (
 	"strings"
 	"math"
 	"strconv"
+    "path/filepath"
 )
 
 func usage() {
@@ -33,109 +34,6 @@ func usage() {
     fmt.Println("[-h/--help] <Help>")
 }
 
-func pairs(r1 *sam.Record, r2 *sam.Record, stat map[string]int, mapq int, bw *bam.Writer, verbose bool) error {
-	v, _ := stat["Total_pairs_processed"]
-	stat["Total_pairs_processed"] = v + 1
-	if verbose && v%1000000 == 0 {
-		fmt.Println("##", v)
-	}
-
-	if strings.Contains(r1.Flags.String(), "u") && strings.Contains(r2.Flags.String(), "u") {
-		v, _ = stat["Unmapped_pairs"]
-		stat["Unmapped_pairs"] = v + 1
-		return nil
-	}
-
-	if strings.Contains(r1.Flags.String(), "u") || strings.Contains(r2.Flags.String(), "u") {
-		v, _ = stat["Pairs_with_Singleton"]
-		stat["Pairs_with_Singleton"] = v + 1
-		return nil
-	}
-
-	if int(r1.MapQ) < mapq || int(r2.MapQ) < mapq {
-		v, _ = stat["Low_qual_pairs"]
-		stat["Low_qual_pairs"] = v + 1
-		return nil
-	}
-
-	if is_unique_bowtie2(r1) && is_unique_bowtie2(r2) {
-		v, _ = stat["Unique_paired_alignments"]
-		stat["Unique_paired_alignments"] = v + 1
-		err := bw.Write(r1)
-		if err != nil {
-			log.Fatalf("write outbam err")
-		}
-		err = bw.Write(r2)
-		if err != nil {
-			log.Fatalf("write outbam err")
-		}
-		return nil
-	} else {
-		v, _ = stat["Multiple_pairs_alignments"]
-		stat["Multiple_pairs_alignments"] = v + 1
-		return nil
-	}
-	return nil
-}
-
-func is_unique_bowtie2(r *sam.Record) (ret bool) {
-	ret = false
-
-	var primary1 int8
-	var secondary1 int8
-
-	aux, ok := r.Tag([]byte("AS"))
-	if aux != nil && ok {
-		aux2, ok2 := r.Tag([]byte("XS"))
-		if aux2 != nil && ok2 {
-			primary := aux.Value()
-			secondary := aux2.Value()
-			switch primary.(type) {
-			case int8:
-				primary1 = primary.(int8)
-			case uint8:
-				primary1 = int8(primary.(uint8))
-			}
-
-			switch secondary.(type) {
-			case int8:
-				secondary1 = secondary.(int8)
-			case uint8:
-				secondary1 = int8(secondary.(uint8))
-			}
-
-			if primary1 != secondary1 {
-				ret = true
-			}
-		} else {
-			ret = true
-		}
-	}
-	return
-}
-
-func percent(part int, all int) string {
-	percent := fmt.Sprintf("%.3f", float64(part)*100/float64(all))
-	return percent
-}
-
-func report_stat(stat map[string]int, outfile string) error {
-	out_stat := strings.Replace(outfile, ".bam", ".pairstat", -1)
-	//stat_out, _ := os.OpenFile(out_stat, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
-	stat_out, _ := os.Create(out_stat)
-	defer stat_out.Close()
-	//writer := bufio.NewWriter(stat_out)
-
-	keys := [6]string{"Total_pairs_processed", "Unmapped_pairs", "Pairs_with_Singleton", "Low_qual_pairs", "Unique_paired_alignments", "Multiple_pairs_alignments"}
-	for _, k := range keys {
-		outbyte := fmt.Sprintf("%v\t%v\t%v\n", k, stat[k], percent(stat[k], stat["Total_pairs_processed"]))
-		_, _ = stat_out.WriteString(outbyte)
-	}
-	//writer.Flush()
-	return nil
-}
-
-//%v\t%v  k, stat[k],
 
 func get_read_strand(r *sam.Record) (strand string) {
 	/*
@@ -256,11 +154,11 @@ func get_ordered_reads(read1 *sam.Record, read2 *sam.Record)(r1 *sam.Record, r2 
     return r1, r2
 }
 
-func load_restriction_fragment(in_file string, minfragsize int, maxfragsize int, verbose bool){
+func load_restriction_fragment(in_file string, minfragsize int, maxfragsize int, verbose bool)map[string]*Set {
     /*
-    Read a BED file and store the intervals in a tree
-    Intervals are zero-based objects. The output object is a hash table with
-    one search tree per chromosome
+       Read a BED file and store the intervals in a tree
+       Intervals are zero-based objects. The output object is a hash table with
+       one search tree per chromosome
     */
     resFrag := make(map[string]*Set)
 
@@ -269,56 +167,61 @@ func load_restriction_fragment(in_file string, minfragsize int, maxfragsize int,
     }
 
     rw, err := os.Open(in_file)
-	if err != nil {
-		panic(err)
-	}
-	defer rw.Close()
-	rb := bufio.NewReader(rw)
-	nline := 0
-	for {
-		nline += 1
-		line_byte, _, err := rb.ReadLine()
-		if err == io.EOF {
-			break
-		}
-		bedtab := bytes.Split(line_byte, []byte{'\t'})
-		var start int
-		var end int
+    if err != nil {
+        panic(err)
+    }
+    defer rw.Close()
+    rb := bufio.NewReader(rw)
+    nline := 0
+    for {
+        nline += 1
+        line_byte, _, err := rb.ReadLine()
+        if err == io.EOF {
+            break
+        }
+        bedtab := bytes.Split(line_byte, []byte{'\t'})
+        var start int
+        var end int
 
-		//BED files are zero-based as Intervals objects
-		name := string(bedtab[3])
-		chromosome := string(bedtab[0])
-		start, err = strconv.Atoi(string(bedtab[1]))
-		end, err = strconv.Atoi(string(bedtab[2]))
-		start += 1
-		end += 1
-		fragl = end - start
-		
-		// Discard fragments outside the size range
-        if minfragsize != 0 and fragl < minfragsize{
-        	fmt.Println("Warning : fragment ", name, " [", fragl, "] outside of range. Discarded")
+        //BED files are zero-based as Intervals objects
+        name := string(bedtab[3])
+        chromosome := string(bedtab[0])
+        start, err = strconv.Atoi(string(bedtab[1]))
+        end, err = strconv.Atoi(string(bedtab[2]))
+        start += 1
+        end += 1
+        fragl := end - start
+
+        // Discard fragments outside the size range
+        if minfragsize != 0 && fragl < minfragsize {
+            fmt.Println("Warning : fragment ", name, " [", fragl, "] outside of range. Discarded")
             continue
         }
-        if maxfragsize != 0 and fragl > maxfragsize{
-            fmt.Println("Warning : fragment ", name, " [", fragl,"] outside of range. Discarded")
+        if maxfragsize != 0 && fragl > maxfragsize {
+            fmt.Println("Warning : fragment ", name, " [", fragl, "] outside of range. Discarded")
             continue
         }
 
         frag_span := &Span{
-			name,
-			start,
-			end,
-		}
+            name,
+            start,
+            end,
+        }
+
 
         if _, ok := resFrag[chromosome]; ok {
-        	tree := resFrag[chromosome]
-        	tree.DangerInsert(frag_span)
-		} else{
-			 tree := NewSet(frag_span)
-			 resFrag[chromosome] = tree
-		} 
-	}
-	return resFrag
+            tree := resFrag[chromosome]
+            tree.DangerInsert(frag_span)
+        } else {
+            tree := Empty()
+            tree.DangerInsert(frag_span)
+
+            //tree := NewSet(frag_span)
+            resFrag[chromosome] = tree
+            fmt.Println(tree)
+        }
+    }
+    return resFrag
 }
 
 func get_overlapping_restriction_fragment(resFrag map[string]*Set, chrom string, read *sam.Record) Interval{
@@ -363,13 +266,15 @@ func are_contiguous_fragments(frag1, frag2 Interval, chr1, chr2 string)ret bool{
     ret = false
     var d int
     if chr1 == chr2{
-        if frag1.MIN() < frag2.MIN()):
+        if frag1.MIN() < frag2.MIN()){
             d = frag2.MIN() - frag1.MAX()
-        else:
+        }else{
             d = frag1.MIN() - frag2.MAX()
+        }
             
-        if d == 0:
+        if d == 0{
             ret = true
+        }
     }
     return
 }
@@ -544,7 +449,6 @@ func get_interaction_type(read1 *sam.Record, read1_chrom string, resfrag1 Interv
     return interactionType
 }
 
-
 /*
 func get_read_tag(read, tag):
     for t in read.tags:
@@ -553,29 +457,193 @@ func get_read_tag(read, tag):
     return nil
 */
 
+type valid struct{
+    readId            string
+    r1_chrom          string
+    r1_pos            int
+    r1_strand         int8
+    r2_chrom          string
+    r2_pos            int
+    r2_strand         int8
+    dist              int
+    r1_fragname       string
+    r2_fragname       string
+    r1_mapq           uint8
+    r2_mapq           uint8
+    interactiontype   string
+}
+
+func (interacs *valid) set_valid_pair(read1, read2 *sam.Record, resFrag map[string]*Set) error{
+    interacs.readId = read1.Name
+
+    interacs.r1_chrom = read1.Ref.Name()
+    interacs.r1_pos = read1.Pos
+    interacs.r1_strand = get_read_strand(read1)
+    interacs.r1_mapq = read1.MapQ
+    interacs.r1_fragname = get_overlapping_restriction_fragment(resFrag, read1.Ref.Name(), read1)
+
+    interacs.r2_chrom = read2.Ref.Name()
+    interacs.r2_pos = read2.Pos
+    interacs.r2_strand = get_read_strand(read2)
+    interacs.r2_mapq = read2.MapQ
+    interacs.r2_fragname = get_overlapping_restriction_fragment(resFrag, read2.Ref.Name(), read2)
+
+    interacs.dist = get_cis_dist(read1, read2)
+    return nil
+}
+
+
+
+func indeed_interaction_type(read1 *sam.Record, read2 *sam.Record, resFrag map[string]*Set, shortestInsertSize int, longestInsertSize int, minCisDist int)string{
+    r1, r2 := get_ordered_reads(read1, read2)
+    interacs := &valid{}
+    err := interacs.set_valid_pair(r1, r2, resFrag)
+    check(err)
+    if interacs.r1_fragname == nil || interacs.r2_fragname == nil{
+        interacs.interactiontype = "DUMP"
+    }else{
+        interactionType := get_interaction_type(r1, interacs.r1_chrom, interacs.r1_fragname, r2, interacs.r2_chrom, interacs.r2_fragname)
+        if interactionType == "" && 
+
+
+
+    }
+
+
+
+}
+
+
+func usage() {
+    //Usage function
+    fmt.Println("Usage : mapped_2hic_fragments")
+    fmt.Println("-f/--fragmentFile <Restriction fragment file GFF3>")
+    fmt.Println("-r/--mappedReadsFile <BAM/SAM file of mapped reads>")
+    fmt.Println("[-o/--outputDir] <Output directory. Default is current directory>")
+    fmt.Println("[-s/--shortestInsertSize] <Shortest insert size of mapped reads to consider>")
+    fmt.Println("[-l/--longestInsertSize] <Longest insert size of mapped reads to consider>")
+    fmt.Println("[-t/--shortestFragmentLength] <Shortest restriction fragment length to consider>")
+    fmt.Println("[-m/--longestFragmentLength] <Longest restriction fragment length to consider>")
+    fmt.Println("[-d/--minCisDist] <Minimum distance between intrachromosomal contact to consider>")
+    fmt.Println("[-g/--gtag] <Genotype tag. If specified, this tag will be reported in the valid pairs output for allele specific classification>")
+    fmt.Println("[-a/--all] <Write all additional output files, with information about the discarded reads (self-circle, dangling end, etc.)>")
+    fmt.Println("[-S/--sam] <Output an additional SAM file with flag 'CT' for pairs classification>")
+    fmt.Println("[-v/--verbose] <Verbose>")
+    fmt.Println("[-h/--help] <Help>")
+}
+
+func check(e error) {
+    if e != nil {
+        log.Fatal(e)
+    }
+}
 
 func main() {
-	forward_file := flag.String("f", "", "fragmentFile <Restriction fragment file GFF3>")
-	reverse_file := flag.String("r", "", "mappedReadsFile <BAM/SAM file of mapped reads>")
+	fragmentFile := flag.String("f", "", "fragmentFile <Restriction fragment file GFF3>")
+	mappedReadsFile := flag.String("r", "", "mappedReadsFile <BAM/SAM file of mapped reads>")
 	outputDir := flag.String("o", "", "<Output directory. Default is current directory>")
 	shortestInsertSize := flag.Int("s", 0, "<Shortest insert size of mapped reads to consider>")
 	longestInsertSize := flag.Int("l", 0, "<Longest insert size of mapped reads to consider>")
 	shortestFragmentLength := flag.Int("t", 0, "<Shortest restriction fragment length to consider>")
 	longestFragmentLength := flag.Int("m", 0, "<Longest restriction fragment length to consider>")
 	minCisDist := flag.Int("d", 0, "<Minimum distance between intrachromosomal contact to consider>")
-	gtag := flag.Int("g", 0, "<Genotype tag. If specified, this tag will be reported in the valid pairs output for allele specific classification>")
-	all := flag.Int("a", 0, "<Write all additional output files, with information about the discarded reads (self-circle, dangling end, etc.)>")
-	samOut := flag.Int("S", 0, "<Output an additional SAM file with flag 'CT' for pairs classification>")
-	verbose := flag.Int("v", 0, "<Verbose>")
 
-	stat_yes := flag.Bool("t", false, "show stat file")
+	_ = flag.String("g", "", "<Genotype tag. If specified, this tag will be reported in the valid pairs output for allele specific classification>")
+	allOuput := flag.Bool("a", false, "<Write all additional output files, with information about the discarded reads (self-circle, dangling end, etc.)>")
+	samOut := flag.Bool("S", false, "<Output an additional SAM file with flag 'CT' for pairs classification>")
 	verbose := flag.Bool("v", false, "show verbose")
+    help := flag.Bool("h", false, "show help")
+
+	//stat_yes := flag.Bool("t", false, "show stat file")
 	flag.Parse()
 
-	if *forward_file == "" || *reverse_file == "" || *outfile == "" {
-		usage()
-		log.Fatalf("Parameter error,please check -f -r -o")
-	}
+	if *help == true || *fragmentFile == "" || *mappedReadsFile == "" || *outputDir == ""{
+        usage()
+        log.Fatalf("Parameter error, please check -f -r -o")
+    }
+
+    fmt.Println("Genotype tag function not developed, -g parameter does not work!")
+
+    if *verbose == true {
+        fmt.Println("## overlapMapped2HiCFragments")
+        fmt.Println("## mappedReadsFile=", *mappedReadsFile)
+        fmt.Println("## fragmentFile=", *fragmentFile)
+        fmt.Println("## minInsertSize=", *minInsertSize)
+        fmt.Println("## maxInsertSize=", *maxInsertSize)
+        fmt.Println("## minFragSize=", *minFragSize)
+        fmt.Println("## maxFragSize=", *maxFragSize)
+        fmt.Println("## allOuput=", *allOuput)
+        fmt.Println("## SAM ouput=", *samOut)
+        fmt.Println("## verbose=", *verbose, "\n")
+    }
+
+    // Initialize variables
+    reads_counter := 0
+    de_counter := 0
+    re_counter := 0
+    sc_counter := 0
+    valid_counter := 0
+    valid_counter_FF := 0
+    valid_counter_RR := 0
+    valid_counter_FR := 0
+    valid_counter_RF := 0
+    single_counter := 0
+    dump_counter := 0
+
+    /*
+    // AS counter
+    G1G1_ascounter := 0
+    G2G2_ascounter := 0
+    G1U_ascounter := 0
+    UG1_ascounter := 0
+    G2U_ascounter := 0
+    UG2_ascounter := 0
+    G1G2_ascounter := 0
+    G2G1_ascounter := 0
+    UU_ascounter := 0
+    CF_ascounter := 0
+    */
+
+    baseReadsFile := filepath.Base(*mappedReadsFile)
+    baseReadsFile = strings.TrimSuffix(strq, ".bam")
+    baseReadsFile = strings.TrimSuffix(strq, ".sam")
+
+    handle_valid, err := os.Create(fmt.Sprintf("%s/%s.validPairs", *outputDir, baseReadsFile))
+    check(err)
+    defer handle_valid.Close()
+
+    if *allOuput == true {
+        fmt.Println("DEPairs REPairs SCPairs ")
+    }
+
+    resFrag := load_restriction_fragment(*fragmentFile, *minFragSize, *maxFragSize, *verbose)
+
+    bam_read, _ := os.Open(*mappedReadsFile)
+    defer bam_read.Close()
+    br, err := bam.NewReader(bam_read, 1)
+    check(err)
+    defer br.Close()
+
+    for {
+        r1, err := br.Read()
+        if err == io.EOF {
+            break
+        }
+        check(err)
+
+        r2, err := br.Read()
+        if err == io.EOF {
+            break
+        }
+        check(err)
+
+        if r1.Name != r2.Name {
+            log.Fatalf("Forward and reverse reads not paired. Check that BAM files are sorted.")
+        }
+
+        _ = pairs(r1, r2, stat, *mapq, bw, *verbose)
+    }
+
 
 	bam_read1, _ := os.Open(*forward_file)
 	defer bam_read1.Close()
